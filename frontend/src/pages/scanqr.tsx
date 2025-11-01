@@ -16,17 +16,19 @@ export default function ScanQR() {
       <QrScanner
         delay={300}
         style={previewStyle}
-        facingMode={"environment"} // ✅ back camera
+        onError={(err) => console.error(err)}
         onScan={(result) => {
           if (result) {
             setData(result.text);
-            window.location.href = result.text; // ✅ redirect to backend URL
+            window.location.href = result.text; // ✅ Redirect to backend
           }
         }}
-        onError={(error) => console.log(error)}
+        constraints={{
+          video: { facingMode: "environment" }, // ✅ Back camera
+        }}
       />
 
-      <p className="mt-3 break-all">{data}</p>
+      <p className="mt-3">{data}</p>
     </div>
   );
 }
