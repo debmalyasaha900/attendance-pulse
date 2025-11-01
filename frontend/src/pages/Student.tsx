@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,11 +7,12 @@ import { useNavigate } from "react-router-dom";
 import { ArrowLeft, QrCode, CheckCircle2, XCircle, Calendar } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
 import { Progress } from "@/components/ui/progress";
+import { getAttendanceByStudent } from "@/integrations/supabase/api";
 
 interface AttendanceRecord {
   date: string;
   subject: string;
-  status: "present" | "absent";
+  status: string;
 }
 
 const Student = () => {
@@ -21,20 +22,31 @@ const Student = () => {
   const [studentId, setStudentId] = useState("");
   const [studentName, setStudentName] = useState("");
 
-  // Mocked data
-  const [attendanceRecords] = useState<AttendanceRecord[]>([
-    { date: "2025-01-29", subject: "Data Structures", status: "present" },
-    { date: "2025-01-28", subject: "Web Development", status: "present" },
-    { date: "2025-01-27", subject: "Database Systems", status: "absent" },
-    { date: "2025-01-26", subject: "Data Structures", status: "present" },
-    { date: "2025-01-25", subject: "Web Development", status: "present" },
-  ]);
+  const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([]);
+  const [loading, setLoading] = useState(false);
 
-  const attendancePercentage = Math.round(
-    (attendanceRecords.filter((r) => r.status === "present").length /
-      attendanceRecords.length) *
-      100
-  );
+  // ✅ Fetch attendance when studentId changes
+  useEffect(() => {
+    if (!studentId) return;
+
+    async function loadAttendance() {
+      setLoading(true);
+      const records = await getAttendanceByStudent(studentId);
+      setAttendanceRecords(records || []);
+      setLoading(false);
+    }
+
+    loadAttendance();
+  }, [studentId]);
+
+  const attendancePercentage =
+    attendanceRecords.length > 0
+      ? Math.round(
+          (attendanceRecords.filter((r) => r.status === "present").length /
+            attendanceRecords.length) *
+            100
+        )
+      : 0;
 
   const handleScanQR = () => {
     if (!studentId || !studentName) {
@@ -46,7 +58,7 @@ const Student = () => {
       return;
     }
 
-    // ✅ Save student details for scan page
+    // ✅ Save student details for scanning page
     localStorage.setItem("studentId", studentId);
     localStorage.setItem("studentName", studentName);
 
@@ -67,7 +79,7 @@ const Student = () => {
         </div>
 
         <div className="grid md:grid-cols-2 gap-6 mb-6">
-          {/* LEFT CARD - Mark Attendance */}
+          {/* ✅ LEFT CARD */}
           <Card className="p-6 bg-gradient-card shadow-lg">
             <h2 className="text-2xl font-semibold mb-6 text-card-foreground">Mark Attendance</h2>
 
@@ -103,85 +115,99 @@ const Student = () => {
             </p>
           </Card>
 
-          {/* RIGHT CARD - Overview */}
+          {/* ✅ RIGHT CARD */}
           <Card className="p-6 bg-gradient-card shadow-lg">
-            <h2 className="text-2xl font-semibold mb-6 text-card-foreground">Attendance Overview</h2>
+            <h2 className="text-2xl font-semibold mb-6 text-card-foreground">
+              Attendance Overview
+            </h2>
 
-            <div className="space-y-6">
-              <div>
-                <div className="flex justify-between items-center mb-2">
-                  <span className="text-sm font-medium text-muted-foreground">
-                    Overall Attendance
-                  </span>
-                  <span className="text-2xl font-bold text-primary">
-                    {attendancePercentage}%
-                  </span>
-                </div>
-                <Progress value={attendancePercentage} className="h-3" />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="bg-muted p-4 rounded-lg">
-                  <div className="flex items-center gap-2 mb-2">
-                    <CheckCircle2 className="w-5 h-5 text-accent" />
-                    <span className="text-sm text-muted-foreground">Present</span>
+            {loading ? (
+              <p className="text-muted-foreground">Loading attendance...</p>
+            ) : attendanceRecords.length === 0 ? (
+              <p className="text-muted-foreground">No attendance records found.</p>
+            ) : (
+              <div className="space-y-6">
+                <div>
+                  <div className="flex justify-between items-center mb-2">
+                    <span className="text-sm font-medium text-muted-foreground">
+                      Overall Attendance
+                    </span>
+                    <span className="text-2xl font-bold text-primary">
+                      {attendancePercentage}%
+                    </span>
                   </div>
-                  <p className="text-2xl font-bold text-accent">
-                    {attendanceRecords.filter((r) => r.status === "present").length}
-                  </p>
+                  <Progress value={attendancePercentage} className="h-3" />
                 </div>
 
-                <div className="bg-muted p-4 rounded-lg">
-                  <div className="flex items-center gap-2 mb-2">
-                    <XCircle className="w-5 h-5 text-destructive" />
-                    <span className="text-sm text-muted-foreground">Absent</span>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="bg-muted p-4 rounded-lg">
+                    <div className="flex items-center gap-2 mb-2">
+                      <CheckCircle2 className="w-5 h-5 text-accent" />
+                      <span className="text-sm text-muted-foreground">Present</span>
+                    </div>
+                    <p className="text-2xl font-bold text-accent">
+                      {attendanceRecords.filter((r) => r.status === "present").length}
+                    </p>
                   </div>
-                  <p className="text-2xl font-bold text-destructive">
-                    {attendanceRecords.filter((r) => r.status === "absent").length}
-                  </p>
+
+                  <div className="bg-muted p-4 rounded-lg">
+                    <div className="flex items-center gap-2 mb-2">
+                      <XCircle className="w-5 h-5 text-destructive" />
+                      <span className="text-sm text-muted-foreground">Absent</span>
+                    </div>
+                    <p className="text-2xl font-bold text-destructive">
+                      {attendanceRecords.filter((r) => r.status === "absent").length}
+                    </p>
+                  </div>
                 </div>
               </div>
-            </div>
+            )}
           </Card>
         </div>
 
-        {/* Recent Attendance Section */}
+        {/* ✅ Recent Attendance */}
         <Card className="p-6 bg-gradient-card shadow-lg">
           <div className="flex items-center gap-2 mb-6">
             <Calendar className="w-6 h-6 text-primary" />
-            <h2 className="text-2xl font-semibold text-card-foreground">Recent Attendance</h2>
+            <h2 className="text-2xl font-semibold text-card-foreground">
+              Recent Attendance
+            </h2>
           </div>
 
-          <div className="space-y-3">
-            {attendanceRecords.map((record, index) => (
-              <div
-                key={index}
-                className="flex items-center justify-between p-4 bg-muted rounded-lg hover:bg-muted/80 transition-colors"
-              >
-                <div className="flex items-center gap-4">
-                  {record.status === "present" ? (
-                    <CheckCircle2 className="w-5 h-5 text-accent" />
-                  ) : (
-                    <XCircle className="w-5 h-5 text-destructive" />
-                  )}
-                  <div>
-                    <p className="font-medium text-foreground">{record.subject}</p>
-                    <p className="text-sm text-muted-foreground">{record.date}</p>
-                  </div>
-                </div>
-
-                <span
-                  className={`px-3 py-1 rounded-full text-sm font-medium ${
-                    record.status === "present"
-                      ? "bg-accent/10 text-accent"
-                      : "bg-destructive/10 text-destructive"
-                  }`}
+          {attendanceRecords.length === 0 ? (
+            <p className="text-muted-foreground">No attendance recorded.</p>
+          ) : (
+            <div className="space-y-3">
+              {attendanceRecords.map((record, index) => (
+                <div
+                  key={index}
+                  className="flex items-center justify-between p-4 bg-muted rounded-lg hover:bg-muted/80 transition-colors"
                 >
-                  {record.status === "present" ? "Present" : "Absent"}
-                </span>
-              </div>
-            ))}
-          </div>
+                  <div className="flex items-center gap-4">
+                    {record.status === "present" ? (
+                      <CheckCircle2 className="w-5 h-5 text-accent" />
+                    ) : (
+                      <XCircle className="w-5 h-5 text-destructive" />
+                    )}
+                    <div>
+                      <p className="font-medium text-foreground">{record.subject}</p>
+                      <p className="text-sm text-muted-foreground">{record.date}</p>
+                    </div>
+                  </div>
+
+                  <span
+                    className={`px-3 py-1 rounded-full text-sm font-medium ${
+                      record.status === "present"
+                        ? "bg-accent/10 text-accent"
+                        : "bg-destructive/10 text-destructive"
+                    }`}
+                  >
+                    {record.status === "present" ? "Present" : "Absent"}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
         </Card>
       </div>
     </div>

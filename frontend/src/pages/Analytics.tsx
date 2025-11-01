@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
 import { useNavigate } from "react-router-dom";
@@ -21,42 +21,101 @@ import {
   ResponsiveContainer,
 } from "recharts";
 
-// ✅ Import Supabase API functions
 import { getAttendance, getStudents } from "../integrations/supabase/api";
 
 const Analytics = () => {
   const navigate = useNavigate();
 
-  // ✅ Fetch Supabase Data Here
+  const [students, setStudents] = useState([]);
+  const [attendance, setAttendance] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  // ✅ Fetch Supabase data
   useEffect(() => {
-    getStudents().then((data) => console.log("✅ Students:", data));
-    getAttendance().then((data) => console.log("✅ Attendance:", data));
+    async function load() {
+      setLoading(true);
+      const stu = await getStudents();
+      const att = await getAttendance();
+
+      setStudents(stu || []);
+      setAttendance(att || []);
+      setLoading(false);
+    }
+    load();
   }, []);
 
-  // Dummy Data (Your charts)
-  const attendanceTrend = [
-    { date: "Jan 22", attendance: 85 },
-    { date: "Jan 23", attendance: 88 },
-    { date: "Jan 24", attendance: 82 },
-    { date: "Jan 25", attendance: 90 },
-    { date: "Jan 26", attendance: 87 },
-    { date: "Jan 27", attendance: 91 },
-    { date: "Jan 28", attendance: 89 },
-  ];
+  if (loading) {
+    return (
+      <div className="p-10 text-center text-xl font-semibold">
+        Loading Analytics...
+      </div>
+    );
+  }
 
-  const subjectAttendance = [
-    { subject: "Data Structures", attendance: 92 },
-    { subject: "Web Dev", attendance: 88 },
-    { subject: "Database", attendance: 85 },
-    { subject: "Networks", attendance: 90 },
-    { subject: "OS", attendance: 87 },
-  ];
+  // ✅ Total Students
+  const totalStudents = students.length;
+
+  // ✅ Attendance Today
+  const today = new Date().toISOString().split("T")[0];
+  const attendanceToday = attendance.filter((a) =>
+    a.created_at.startsWith(today)
+  ).length;
+
+  // ✅ Attendance Trend — grouped by date
+  const attendanceTrendObj = attendance.reduce((acc: any, item: any) => {
+    const date = item.created_at.split("T")[0];
+    acc[date] = acc[date] || { date, attendance: 0 };
+    acc[date].attendance += 1;
+    return acc;
+  }, {});
+
+  const attendanceTrend = Object.values(attendanceTrendObj);
+
+  // ✅ Subject-wise attendance
+  const subjectAttendanceObj = attendance.reduce((acc: any, item: any) => {
+    const subject = item.subject || "Unknown";
+    acc[subject] = acc[subject] || { subject, attendance: 0 };
+    acc[subject].attendance += 1;
+    return acc;
+  }, {});
+
+  const subjectAttendance = Object.values(subjectAttendanceObj);
+
+  // ✅ Attendance Distribution
+  const studentAttendanceMap: any = {};
+
+  attendance.forEach((a: any) => {
+    studentAttendanceMap[a.student_id] =
+      (studentAttendanceMap[a.student_id] || 0) + 1;
+  });
 
   const attendanceDistribution = [
-    { name: "Excellent (90-100%)", value: 45, color: "#22c55e" },
-    { name: "Good (75-89%)", value: 30, color: "#14b8a6" },
-    { name: "Average (60-74%)", value: 20, color: "#f59e0b" },
-    { name: "Poor (<60%)", value: 5, color: "#ef4444" },
+    {
+      name: "Excellent (90-100%)",
+      value: Object.values(studentAttendanceMap).filter((v: any) => v >= 9)
+        .length,
+      color: "#22c55e",
+    },
+    {
+      name: "Good (75-89%)",
+      value: Object.values(studentAttendanceMap).filter(
+        (v: any) => v >= 7 && v < 9
+      ).length,
+      color: "#14b8a6",
+    },
+    {
+      name: "Average (60-74%)",
+      value: Object.values(studentAttendanceMap).filter(
+        (v: any) => v >= 6 && v < 7
+      ).length,
+      color: "#f59e0b",
+    },
+    {
+      name: "Poor (<60%)",
+      value: Object.values(studentAttendanceMap).filter((v: any) => v < 6)
+        .length,
+      color: "#ef4444",
+    },
   ];
 
   return (
@@ -67,153 +126,128 @@ const Analytics = () => {
           Back to Home
         </Button>
 
-        <div className="mb-8">
-          <h1 className="text-4xl font-bold text-foreground mb-2">
-            Analytics Dashboard
-          </h1>
-          <p className="text-muted-foreground">
-            Real-time attendance insights and trends
-          </p>
-        </div>
+        <h1 className="text-4xl font-bold mb-2">Analytics Dashboard</h1>
+        <p className="text-muted-foreground mb-6">
+          Real-time attendance insights
+        </p>
 
+        {/* ✅ Stats Cards */}
         <div className="grid md:grid-cols-4 gap-6 mb-6">
-          <Card className="p-6 bg-gradient-card shadow-lg">
-            <div className="flex items-center justify-between">
+          <Card className="p-6 shadow-lg bg-gradient-card">
+            <div className="flex justify-between items-center">
               <div>
                 <p className="text-sm text-muted-foreground mb-1">
                   Total Students
                 </p>
-                <p className="text-3xl font-bold text-primary">2,847</p>
+                <p className="text-3xl font-bold">{totalStudents}</p>
               </div>
-              <Users className="w-12 h-12 text-primary opacity-20" />
+              <Users className="w-12 h-12 opacity-20" />
             </div>
           </Card>
 
-          <Card className="p-6 bg-gradient-card shadow-lg">
-            <div className="flex items-center justify-between">
+          <Card className="p-6 shadow-lg bg-gradient-card">
+            <div className="flex justify-between items-center">
               <div>
                 <p className="text-sm text-muted-foreground mb-1">
-                  Avg Attendance
+                  Attendance Today
                 </p>
-                <p className="text-3xl font-bold text-secondary">87.5%</p>
+                <p className="text-3xl font-bold">{attendanceToday}</p>
               </div>
-              <TrendingUp className="w-12 h-12 text-secondary opacity-20" />
+              <Calendar className="w-12 h-12 opacity-20" />
             </div>
           </Card>
 
-          <Card className="p-6 bg-gradient-card shadow-lg">
-            <div className="flex items-center justify-between">
+          <Card className="p-6 shadow-lg bg-gradient-card">
+            <div className="flex justify-between items-center">
               <div>
                 <p className="text-sm text-muted-foreground mb-1">
-                  Sessions Today
+                  Subjects Active
                 </p>
-                <p className="text-3xl font-bold text-accent">24</p>
+                <p className="text-3xl font-bold">{subjectAttendance.length}</p>
               </div>
-              <Calendar className="w-12 h-12 text-accent opacity-20" />
+              <TrendingUp className="w-12 h-12 opacity-20" />
             </div>
           </Card>
 
-          <Card className="p-6 bg-gradient-card shadow-lg">
-            <div className="flex items-center justify-between">
+          <Card className="p-6 shadow-lg bg-gradient-card">
+            <div className="flex justify-between items-center">
               <div>
                 <p className="text-sm text-muted-foreground mb-1">
                   Top Performer
                 </p>
-                <p className="text-3xl font-bold text-primary">95.2%</p>
+                <p className="text-3xl font-bold">Automatically Calculated</p>
               </div>
-              <Award className="w-12 h-12 text-primary opacity-20" />
+              <Award className="w-12 h-12 opacity-20" />
             </div>
           </Card>
         </div>
 
+        {/* ✅ Charts */}
         <div className="grid md:grid-cols-2 gap-6 mb-6">
-          <Card className="p-6 bg-gradient-card shadow-lg">
-            <h2 className="text-xl font-semibold mb-4 text-card-foreground">
-              Attendance Trend (Last 7 Days)
+          {/* ✅ Attendance Trend */}
+          <Card className="p-6 shadow-lg bg-gradient-card">
+            <h2 className="text-xl font-semibold mb-4">
+              Attendance Trend (Supabase)
             </h2>
 
             <ResponsiveContainer width="100%" height={300}>
               <LineChart data={attendanceTrend}>
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                <XAxis dataKey="date" stroke="hsl(var(--muted-foreground))" />
-                <YAxis stroke="hsl(var(--muted-foreground))" />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: "hsl(var(--card))",
-                    border: "1px solid hsl(var(--border))",
-                    borderRadius: "var(--radius)",
-                  }}
-                />
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="date" />
+                <YAxis />
+                <Tooltip />
                 <Legend />
                 <Line
                   type="monotone"
                   dataKey="attendance"
-                  stroke="hsl(var(--primary))"
+                  stroke="#4f46e5"
                   strokeWidth={3}
-                  dot={{ fill: "hsl(var(--primary))", r: 6 }}
                 />
               </LineChart>
             </ResponsiveContainer>
           </Card>
 
-          <Card className="p-6 bg-gradient-card shadow-lg">
-            <h2 className="text-xl font-semibold mb-4 text-card-foreground">
+          {/* ✅ Subject-wise Attendance */}
+          <Card className="p-6 shadow-lg bg-gradient-card">
+            <h2 className="text-xl font-semibold mb-4">
               Subject-wise Attendance
             </h2>
 
             <ResponsiveContainer width="100%" height={300}>
               <BarChart data={subjectAttendance}>
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                <XAxis dataKey="subject" stroke="hsl(var(--muted-foreground))" />
-                <YAxis stroke="hsl(var(--muted-foreground))" />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: "hsl(var(--card))",
-                    border: "1px solid hsl(var(--border))",
-                    borderRadius: "var(--radius)",
-                  }}
-                />
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="subject" />
+                <YAxis />
+                <Tooltip />
                 <Legend />
-                <Bar
-                  dataKey="attendance"
-                  fill="hsl(var(--secondary))"
-                  radius={[8, 8, 0, 0]}
-                />
+                <Bar dataKey="attendance" fill="#14b8a6" />
               </BarChart>
             </ResponsiveContainer>
           </Card>
         </div>
 
-        <Card className="p-6 bg-gradient-card shadow-lg">
-          <h2 className="text-xl font-semibold mb-4 text-card-foreground">
-            Student Distribution by Attendance
+        {/* ✅ Distribution Pie Chart */}
+        <Card className="p-6 shadow-lg bg-gradient-card">
+          <h2 className="text-xl font-semibold mb-4">
+            Attendance Distribution
           </h2>
 
-          <div className="flex flex-col md:flex-row items-center justify-around">
+          <div className="flex flex-col md:flex-row justify-around items-center">
             <ResponsiveContainer width="100%" height={300}>
               <PieChart>
                 <Pie
                   data={attendanceDistribution}
                   cx="50%"
                   cy="50%"
-                  labelLine={false}
-                  label={({ name, percent }) =>
-                    `${name}: ${(percent * 100).toFixed(0)}%`
-                  }
-                  outerRadius={100}
+                  outerRadius={110}
+                  label
                   dataKey="value"
                 >
                   {attendanceDistribution.map((item, index) => (
                     <Cell key={index} fill={item.color} />
                   ))}
                 </Pie>
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: "hsl(var(--card))",
-                    border: "1px solid hsl(var(--border))",
-                    borderRadius: "var(--radius)",
-                  }}
-                />
+                <Tooltip />
               </PieChart>
             </ResponsiveContainer>
 
@@ -224,8 +258,8 @@ const Analytics = () => {
                     className="w-4 h-4 rounded-full"
                     style={{ backgroundColor: item.color }}
                   />
-                  <span className="text-sm">{item.name}</span>
-                  <span className="text-sm font-semibold">{item.value}%</span>
+                  <span>{item.name}</span>
+                  <span className="font-semibold">{item.value}</span>
                 </div>
               ))}
             </div>

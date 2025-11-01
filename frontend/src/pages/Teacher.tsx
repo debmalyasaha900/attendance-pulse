@@ -11,6 +11,7 @@ import { useToast } from "@/components/ui/use-toast";
 const Teacher = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
+
   const [className, setClassName] = useState("");
   const [subject, setSubject] = useState("");
   const [qrCode, setQrCode] = useState("");
@@ -35,21 +36,19 @@ const Teacher = () => {
     return () => clearInterval(interval);
   }, [sessionActive, timeLeft]);
 
-  // ✅ ✅ ✅ FIXED QR GENERATION WITH BACKEND URL ✅ ✅ ✅
+  // ✅ GENERATES NEW QR EVERY 20 SECONDS
   const generateNewQR = async () => {
     const newSessionId = `SESSION_${Date.now()}_${Math.random()
       .toString(36)
-      .substr(2, 9)}`;
+      .substring(2, 9)}`;
+
     setSessionId(newSessionId);
 
-    // ✅ DEMO Student ID — replace later with real login
-    const demoStudentId = "student_demo_001";
-
-    // ✅ Backend Attendance URL
-    const qrURL = `http://localhost:8080/api/qr-attendance?student_id=${demoStudentId}&session_id=${newSessionId}`;
+    // ✅ QR URL for attendance API
+    const qrURL = `http://localhost:8080/api/qr-attendance?session_id=${newSessionId}`;
 
     try {
-      const qr = await QRCode.toDataURL(qrURL, {
+      const qrImage = await QRCode.toDataURL(qrURL, {
         width: 300,
         margin: 2,
         color: {
@@ -57,9 +56,10 @@ const Teacher = () => {
           light: "#ffffff",
         },
       });
-      setQrCode(qr);
+
+      setQrCode(qrImage);
     } catch (err) {
-      console.error(err);
+      console.error("QR generation error:", err);
     }
   };
 
@@ -87,6 +87,7 @@ const Teacher = () => {
   const endSession = () => {
     setSessionActive(false);
     setQrCode("");
+
     toast({
       title: "Session Ended",
       description: `Total students marked present: ${studentsPresent}`,
@@ -102,26 +103,21 @@ const Teacher = () => {
         </Button>
 
         <div className="mb-8">
-          <h1 className="text-4xl font-bold text-foreground mb-2">
-            Teacher Portal
-          </h1>
+          <h1 className="text-4xl font-bold text-foreground mb-2">Teacher Portal</h1>
           <p className="text-muted-foreground">
             Generate QR codes for attendance tracking
           </p>
         </div>
 
         <div className="grid md:grid-cols-2 gap-6">
-          {/* LEFT PANEL */}
+          {/* LEFT SECTION */}
           <Card className="p-6 bg-gradient-card shadow-lg">
-            <h2 className="text-2xl font-semibold mb-6 text-card-foreground">
-              Session Setup
-            </h2>
+            <h2 className="text-2xl font-semibold mb-6">Session Setup</h2>
 
             <div className="space-y-4 mb-6">
               <div>
-                <Label htmlFor="className">Class Name</Label>
+                <Label>Class Name</Label>
                 <Input
-                  id="className"
                   placeholder="e.g., CSE-3A"
                   value={className}
                   onChange={(e) => setClassName(e.target.value)}
@@ -130,9 +126,8 @@ const Teacher = () => {
               </div>
 
               <div>
-                <Label htmlFor="subject">Subject</Label>
+                <Label>Subject</Label>
                 <Input
-                  id="subject"
                   placeholder="e.g., Data Structures"
                   value={subject}
                   onChange={(e) => setSubject(e.target.value)}
@@ -157,58 +152,47 @@ const Teacher = () => {
             )}
           </Card>
 
-          {/* RIGHT PANEL */}
+          {/* RIGHT SECTION */}
           <Card className="p-6 bg-gradient-card shadow-lg">
             <div className="flex items-center justify-between mb-6">
-              <h2 className="text-2xl font-semibold text-card-foreground">
-                Active QR Code
-              </h2>
+              <h2 className="text-2xl font-semibold">Active QR Code</h2>
               {sessionActive && (
                 <div className="flex items-center gap-2">
                   <RefreshCw className="w-4 h-4 animate-spin text-primary" />
-                  <span className="text-sm font-medium text-primary">
-                    Refreshes in {timeLeft}s
-                  </span>
+                  <span className="text-sm">Refreshes in {timeLeft}s</span>
                 </div>
               )}
             </div>
 
             {sessionActive ? (
               <div className="space-y-6">
-                <div className="flex justify-center bg-card p-6 rounded-lg border border-border">
-                  {qrCode && (
-                    <img
-                      src={qrCode}
-                      alt="Attendance QR Code"
-                      className="max-w-full"
-                    />
+                <div className="flex justify-center bg-card p-6 rounded-lg border">
+                  {qrCode ? (
+                    <img src={qrCode} alt="QR Code" className="max-w-full" />
+                  ) : (
+                    <p>Loading QR...</p>
                   )}
                 </div>
 
                 <div className="bg-muted p-4 rounded-lg">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-sm font-medium text-muted-foreground">
-                      Session ID
-                    </span>
+                  <div className="flex justify-between mb-2">
+                    <span className="text-sm text-muted-foreground">Session ID</span>
                     <code className="text-xs bg-background px-2 py-1 rounded">
-                      {sessionId.slice(0, 20)}...
+                      {sessionId.slice(0, 18)}...
                     </code>
                   </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium text-muted-foreground">
-                      Students Present
-                    </span>
+
+                  <div className="flex justify-between">
+                    <span className="text-sm text-muted-foreground">Students Present</span>
                     <div className="flex items-center gap-2">
                       <Users className="w-4 h-4 text-accent" />
-                      <span className="text-lg font-bold text-accent">
-                        {studentsPresent}
-                      </span>
+                      <span className="text-lg font-bold">{studentsPresent}</span>
                     </div>
                   </div>
                 </div>
               </div>
             ) : (
-              <div className="flex items-center justify-center h-64 bg-muted rounded-lg border-2 border-dashed border-border">
+              <div className="flex items-center justify-center h-64 bg-muted rounded-lg border-2 border-dashed">
                 <p className="text-muted-foreground">No active session</p>
               </div>
             )}
