@@ -1,200 +1,185 @@
 import express from 'express';
+import cors from 'cors';
 import dotenv from 'dotenv';
 import { createClient } from '@supabase/supabase-js';
-import QRCode from 'qrcode';
-import { z } from 'zod';
-import crypto from 'crypto';
+import bodyParser from 'body-parser';
 
 dotenv.config();
 
-const SERVICE_URL = process.env.SUPABASE_URL!;
-const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!; // Keep secret, server-only
-if (!SERVICE_URL || !SERVICE_KEY) {
-    console.error('Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in .env');
-    process.exit(1);
-}
-
-const supabase = createClient(SERVICE_URL, SERVICE_KEY, { auth: { persistSession: false } });
 const app = express();
+
+// ✅ Enable CORS
+app.use(cors());
+
+// ✅ Parse JSON request body
 app.use(express.json());
+app.use(bodyParser.json());
+
+// ✅ Supabase client
+const supabase = createClient(
+  process.env.SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
+);
+
+/* ------------------------------------------------------------------
+   ✅ API ROUTES
+------------------------------------------------------------------- */
 
 /**
- * Utility: make a short random token (not super long)
+ * ✅ GET /api/students
+ * Returns all students
  */
-function makeToken(len = 12) {
-    return crypto.randomBytes(Math.ceil(len / 2)).toString('hex').slice(0, len);
-}
-
-/**
- * POST /api/sessions/create
- * Body: { session_id: string, expires_in_minutes?: number, generated_by?: uuid }
- * Response: { qr_token, qr_data_url, expires_at }
- */
-app.post('/api/sessions/create', async (req, res) => {
-    const bodySchema = z.object({
-        session_id: z.string().uuid(),
-        expires_in_minutes: z.number().int().positive().optional().default(5),
-        generated_by: z.string().uuid().optional()
-    });
-    const parse = bodySchema.safeParse(req.body);
-    if (!parse.success) return res.status(400).json({ error: parse.error.format() });
-
-    const { session_id, expires_in_minutes, generated_by } = parse.data;
-    const token = makeToken(10);
-    const generatedAt = new Date().toISOString();
-    const expiresAt = new Date(Date.now() + expires_in_minutes * 60000).toISOString();
-
-    // Insert into qr_sessions
-    const { data, error } = await supabase
-        .from('qr_sessions')
-        .insert([{
-            session_id,
-            qr_token: token,
-            generated_by,
-            generated_at: generatedAt,
-            expires_at: expiresAt,
-            is_active: true
-        }])
-        .select()
-        .single();
-
-    if (error) {
-        console.error('Failed to create qr_session', error);
-        return res.status(500).json({ error: error.message });
-    }
-
-    // QR payload could be simply the token + server url; frontend will encode it.
-    const qrPayload = JSON.stringify({ t: token, s: session_id });
-
-    const qrDataUrl = await QRCode.toDataURL(qrPayload);
-
-    res.json({ qr_token: token, expires_at: expiresAt, qr_data_url: qrDataUrl });
+app.get('/api/students', async (req, res) => {
+  const { data, error } = await supabase.from('students').select('*');
+  if (error) {
+    console.error("Supabase Error:", error);
+    return res.status(500).json({ error: error.message });
+  }
+  res.json(data);
 });
 
 /**
- * POST /api/attendance/mark
- * Body: { qr_token: string, student_user_id: uuid, method?: 'qr'|'manual', lat?: number, lng?: number }
- * - Finds active qr_session by token, ensures not expired, gets session_id and marks attendance_records
+ * ✅ POST /api/attendance
+ * Insert attendance for a student
  */
-app.post('/api/attendance/mark', async (req, res) => {
-    const schema = z.object({
-        qr_token: z.string().min(1),
-        student_user_id: z.string().uuid(),
-        method: z.enum(['qr', 'manual', 'auto']).optional().default('qr'),
-        lat: z.number().optional(),
-        lng: z.number().optional()
-    });
-    const parsed = schema.safeParse(req.body);
-    if (!parsed.success) return res.status(400).json({ error: parsed.error.format() });
+app.post('/api/attendance', async (req, res) => {
+  const { student_id, session_id, status, method } = req.body;
 
-    const { qr_token, student_user_id, method, lat, lng } = parsed.data;
+  const { data, error } = await supabase
+    .from('attendance_records')
+    .insert([{ student_id, session_id, status, method }]);
 
-    // 1) Get active QR session
-    const { data: qr, error: qrErr } = await supabase
-        .from('qr_sessions')
-        .select('*')
-        .eq('qr_token', qr_token)
-        .eq('is_active', true)
-        .lte('generated_at', new Date().toISOString())-- no-op but kept
-            .single();
+  if (error) {
+    console.error("Insert Error:", error);
+    return res.status(500).json({ error: error.message });
+  }
 
-    if (qrErr || !qr) {
-        return res.status(404).json({ error: 'Invalid or expired QR token' });
-    }
-
-    const expiresAt = new Date(qr.expires_at);
-    if (expiresAt.getTime() < Date.now()) {
-        // deactivate
-        await supabase.from('qr_sessions').update({ is_active: false }).eq('id', qr.id);
-        return res.status(410).json({ error: 'QR token expired' });
-    }
-
-    // 2) Resolve student -> students.id using users table
-    const { data: studentRow, error: studentErr } = await supabase
-        .from('students')
-        .select('id,user_id')
-        .eq('user_id', student_user_id)
-        .single();
-
-    if (studentErr || !studentRow) {
-        return res.status(404).json({ error: 'Student record not found' });
-    }
-
-    const studentId = studentRow.id;
-    const sessionId = qr.session_id;
-
-    // 3) Insert attendance_records (upsert to avoid duplicates)
-    // Build insert object
-    const attendanceObj: any = {
-        session_id: sessionId,
-        student_id: studentId,
-        marked_by: null,
-        status: 'present',
-        method,
-        metadata: { source: 'qr' }
-    };
-    if (lat !== undefined && lng !== undefined) {
-        // store as text in metadata if PostGIS is not enabled; if PostGIS enabled, use proper geography insertion via SQL
-        attendanceObj.metadata.location = { lat, lng };
-    }
-
-    // Use upsert (on conflict (session_id, student_id) do update set marked_at=..., status=...)
-    const { data: inserted, error: insertErr } = await supabase
-        .from('attendance_records')
-        .upsert(
-            [{
-                session_id: sessionId,
-                student_id: studentId,
-                marked_by: null,
-                status: 'present',
-                method,
-                metadata: attendanceObj.metadata
-            }],
-            { onConflict: ['session_id', 'student_id'] }
-        )
-        .select()
-        .single();
-
-    if (insertErr) {
-        console.error('Attendance insert failed', insertErr);
-        return res.status(500).json({ error: insertErr.message });
-    }
-
-    res.json({ success: true, attendance: inserted });
+  res.json({ message: 'Attendance marked successfully', data });
 });
 
 /**
- * GET /api/attendance/session/:sessionId
- * Returns attendance for a session
+ * ✅ GET /api/attendance
+ * Fetch all attendance records
  */
-app.get('/api/attendance/session/:sessionId', async (req, res) => {
-    const sessionId = req.params.sessionId;
-    const { data, error } = await supabase
-        .from('attendance_records')
-        .select('*, students(user_id, roll_no), students:user_id->users(name,email)')
-        .eq('session_id', sessionId);
+app.get('/api/attendance', async (req, res) => {
+  const { data, error } = await supabase
+    .from('attendance_records')
+    .select('*');
 
-    if (error) return res.status(500).json({ error: error.message });
-    res.json({ data });
+  if (error) {
+    console.error("Attendance Fetch Error:", error);
+    return res.status(500).json({ error: error.message });
+  }
+
+  res.json(data);
 });
 
-/**
- * GET /api/reports/student/:studentId
- * Returns attendance summary for a student
- */
+/* ------------------------------------------------------------------
+ ✅ ✅ ✅ QR ATTENDANCE ROUTE — UUID SAFE + NO DUPLICATES ✅ ✅ ✅
+------------------------------------------------------------------- */
+
+app.get('/api/qr-attendance', async (req, res) => {
+  const { student_id, session_id } = req.query;
+
+  if (!student_id || !session_id) {
+    return res.status(400).send("Missing student_id or session_id");
+  }
+
+  // ✅ student_id stays as string (UUID)
+  const sid = String(student_id);
+
+  // ✅ session_id must be a NUMBER (because your DB column is int8)
+  const sess = Number(session_id);
+
+  if (isNaN(sess)) {
+    return res.status(400).send("Invalid session_id (must be a number)");
+  }
+
+  // ✅ 1. Check if attendance already exists
+  const { data: existing, error: checkError } = await supabase
+    .from('attendance_records')
+    .select('*')
+    .eq('student_id', sid)
+    .eq('session_id', sess);
+
+  if (checkError) {
+    console.error("Check Error:", checkError);
+    return res.status(500).send("Database check failed");
+  }
+
+  if (existing.length > 0) {
+    return res.send("⚠️ Attendance already marked for this session.");
+  }
+
+  // ✅ 2. Insert new attendance
+  const { error } = await supabase
+    .from('attendance_records')
+    .insert([{
+      student_id: sid,
+      session_id: sess,
+      status: "present",
+      method: "qr"
+    }]);
+
+  if (error) {
+    console.error("Insert Error:", error);
+    return res.status(500).send("Error marking attendance");
+  }
+
+  return res.send("✅ Attendance Marked Successfully!");
+});
+
+/* ------------------------------------------------------------------
+   ✅ CLASS REPORT
+------------------------------------------------------------------- */
+app.get('/api/reports/class/:classId', async (req, res) => {
+  const classId = req.params.classId;
+
+  const { data, error } = await supabase
+    .from('attendance_records')
+    .select('*')
+    .eq('class_id', classId);
+
+  if (error) {
+    console.error("Class Report Error:", error);
+    return res.status(500).json({ error: error.message });
+  }
+
+  res.json({ data });
+});
+
+/* ------------------------------------------------------------------
+ ✅ STUDENT REPORT
+------------------------------------------------------------------- */
 app.get('/api/reports/student/:studentId', async (req, res) => {
-    const studentId = req.params.studentId;
-    const { data, error } = await supabase
-        .from('attendance_records')
-        .select('session_id,marked_at,status,method')
-        .eq('student_id', studentId)
-        .order('marked_at', { ascending: false });
+  const studentId = req.params.studentId;
 
-    if (error) return res.status(500).json({ error: error.message });
-    res.json({ data });
+  const { data, error } = await supabase
+    .from('attendance_records')
+    .select('session_id, marked_at, status, method')
+    .eq('student_id', studentId)
+    .order('marked_at', { ascending: false });
+
+  if (error) {
+    console.error("Student Report Error:", error);
+    return res.status(500).json({ error: error.message });
+  }
+
+  res.json({ data });
 });
 
+/* ------------------------------------------------------------------
+   ✅ HEALTH CHECK ENDPOINT
+------------------------------------------------------------------- */
+app.get("/", (req, res) => {
+  res.send("Attendance backend running ✅");
+});
+
+/* ------------------------------------------------------------------
+   ✅ START SERVER
+------------------------------------------------------------------- */
 const PORT = process.env.PORT || 8080;
+
 app.listen(PORT, () => {
-    console.log(`Attendance backend running on port ${PORT}`);
+  console.log(`✅ Attendance backend running on port ${PORT}`);
 });
