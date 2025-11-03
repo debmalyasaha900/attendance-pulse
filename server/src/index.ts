@@ -75,58 +75,64 @@ app.get('/api/attendance', async (req, res) => {
 });
 
 /* ------------------------------------------------------------------
- ✅ ✅ ✅ QR ATTENDANCE ROUTE — UUID SAFE + NO DUPLICATES ✅ ✅ ✅
+ ✅ ✅ ✅ FINAL QR ATTENDANCE ROUTE (ROLL → UUID SAFE) ✅ ✅ ✅
 ------------------------------------------------------------------- */
 
 app.get('/api/qr-attendance', async (req, res) => {
-  const { student_id, session_id } = req.query;
+  try {
+    const rawStudent = (req.query.student_id || '').toString().trim(); // roll number
+    const rawSession = (req.query.session_id || '').toString().trim(); // session number
 
-  if (!student_id || !session_id) {
-    return res.status(400).send("Missing student_id or session_id");
+    if (!rawStudent || !rawSession) {
+      return res.status(400).send('Missing student_id or session_id');
+    }
+
+    // ✅ 1) Check student by roll number (student_id column)
+    const { data: studentRow, error: studentErr } = await supabase
+      .from('students')
+      .select('id')
+      .eq('student_id', rawStudent)
+      .limit(1)
+      .single();
+
+    if (studentErr || !studentRow || !studentRow.id) {
+      return res.status(404).send('Student not found. Add the student to the students table.');
+    }
+
+    const studentUuid = studentRow.id;
+
+    // ✅ 2) Prevent double attendance
+    const { data: existing } = await supabase
+      .from('attendance_records')
+      .select('id')
+      .eq('student_id', studentUuid)
+      .eq('session_id', rawSession)
+      .limit(1);
+
+    if (existing && existing.length > 0) {
+      return res.send('Attendance already marked for this session.');
+    }
+
+    // ✅ 3) Insert attendance
+    const { error: insertErr } = await supabase
+      .from('attendance_records')
+      .insert([{
+        student_id: studentUuid,
+        session_id: rawSession,
+        status: 'present',
+        method: 'qr'
+      }]);
+
+    if (insertErr) {
+      console.error('Insert error:', insertErr);
+      return res.status(500).send('Error marking attendance');
+    }
+
+    return res.send('Attendance marked successfully');
+  } catch (err) {
+    console.error(err);
+    return res.status(500).send('Server error');
   }
-
-  // ✅ student_id stays as string (UUID)
-  const sid = String(student_id);
-
-  // ✅ session_id must be a NUMBER (because your DB column is int8)
-  const sess = Number(session_id);
-
-  if (isNaN(sess)) {
-    return res.status(400).send("Invalid session_id (must be a number)");
-  }
-
-  // ✅ 1. Check if attendance already exists
-  const { data: existing, error: checkError } = await supabase
-    .from('attendance_records')
-    .select('*')
-    .eq('student_id', sid)
-    .eq('session_id', sess);
-
-  if (checkError) {
-    console.error("Check Error:", checkError);
-    return res.status(500).send("Database check failed");
-  }
-
-  if (existing.length > 0) {
-    return res.send("⚠️ Attendance already marked for this session.");
-  }
-
-  // ✅ 2. Insert new attendance
-  const { error } = await supabase
-    .from('attendance_records')
-    .insert([{
-      student_id: sid,
-      session_id: sess,
-      status: "present",
-      method: "qr"
-    }]);
-
-  if (error) {
-    console.error("Insert Error:", error);
-    return res.status(500).send("Error marking attendance");
-  }
-
-  return res.send("✅ Attendance Marked Successfully!");
 });
 
 /* ------------------------------------------------------------------

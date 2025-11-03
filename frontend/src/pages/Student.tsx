@@ -48,19 +48,19 @@ const Student = () => {
         )
       : 0;
 
+  /* ✅ FINAL UPDATED QR FUNCTION */
   const handleScanQR = () => {
     if (!studentId || !studentName) {
       toast({
-        title: "Missing Information",
-        description: "Please enter your student ID and name",
+        title: "Missing Info",
+        description: "Enter student ID and name",
         variant: "destructive",
       });
       return;
     }
 
-    // ✅ Save student details for scanning page
-    localStorage.setItem("studentId", studentId);
-    localStorage.setItem("studentName", studentName);
+    localStorage.setItem("studentId", studentId.trim());
+    localStorage.setItem("studentName", studentName.trim());
 
     navigate("/scanqr");
   };
